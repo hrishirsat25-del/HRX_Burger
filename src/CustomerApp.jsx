@@ -31,6 +31,9 @@ export default function CustomerApp() {
   const [pendingOrderFbId, setPendingOrderFbId] = useState(null);
   const [toast, setToast] = useState("");
   const [custTab, setCustTab] = useState("menu");
+  const [orderStatus, setOrderStatus] = useState("pending"); // pending | locked | ready
+  const [orderReadyPopup, setOrderReadyPopup] = useState(false);
+  const orderWatcherRef = useRef(null);
 
   const showToast = (msg, dur = 2500) => { setToast(msg); setTimeout(() => setToast(""), dur); };
 
@@ -199,8 +202,25 @@ export default function CustomerApp() {
 
     setLastOrder({ ...order, firebaseId: fbId });
     setCart([]); setSelectedExtras([]); setSelectedSauces([]);
+    setOrderStatus("pending");
+    setOrderReadyPopup(false);
     setCStep("success");
     setPendingOrderFbId(fbId);
+
+    // Watch this specific order for status changes
+    const { ref, onValue } = await import('firebase/database');
+    const { db } = await import('./firebase');
+    if (orderWatcherRef.current) orderWatcherRef.current();
+    orderWatcherRef.current = onValue(ref(db, `orders/${fbId}`), (snap) => {
+      const val = snap.val();
+      if (val) {
+        setOrderStatus(val.status === "ready" ? "ready" : val.locked ? "locked" : "pending");
+        if (val.status === "ready") {
+          setOrderReadyPopup(true);
+          if (orderWatcherRef.current) { orderWatcherRef.current(); orderWatcherRef.current = null; }
+        }
+      }
+    });
     setModifyTimer(60);
     if (modifyIntervalRef.current) clearInterval(modifyIntervalRef.current);
     modifyIntervalRef.current = setInterval(() => {
@@ -558,6 +578,38 @@ export default function CustomerApp() {
         {/* SUCCESS */}
         {cStep === "success" && (
           <div style={{ padding: "32px 20px", textAlign: "center" }}>
+
+            {/* LIVE ORDER STATUS */}
+            <div style={{
+              background: orderStatus === "ready" ? "linear-gradient(135deg,#0a2015,#0f3020)" : orderStatus === "locked" ? "linear-gradient(135deg,#0a0f1f,#0f1530)" : "linear-gradient(135deg,#1a0800,#2a1000)",
+              border: `2px solid ${orderStatus === "ready" ? "var(--grn)" : orderStatus === "locked" ? "var(--blue)" : "var(--org)"}`,
+              borderRadius: 18, padding: "20px 16px", marginBottom: 20, transition: "all .5s"
+            }}>
+              <div style={{ fontSize: 48, marginBottom: 8 }}>
+                {orderStatus === "ready" ? "✅" : orderStatus === "locked" ? "👨‍🍳" : "⏳"}
+              </div>
+              <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, letterSpacing: 2, color: orderStatus === "ready" ? "var(--grn)" : orderStatus === "locked" ? "var(--blue)" : "var(--org)" }}>
+                {orderStatus === "ready" ? "YOUR ORDER IS READY!" : orderStatus === "locked" ? "BEING PREPARED..." : "ORDER RECEIVED"}
+              </div>
+              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>
+                {orderStatus === "ready" ? "Go to the counter and collect your order 🎉" : orderStatus === "locked" ? "Your burger is being made right now!" : "Waiting for kitchen to start..."}
+              </div>
+              {orderStatus !== "ready" && (
+                <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 12 }}>
+                  {["ORDER RECEIVED", "PREPARING", "READY"].map((s, i) => {
+                    const active = i === 0 ? true : i === 1 ? orderStatus === "locked" || orderStatus === "ready" : orderStatus === "ready";
+                    return (
+                      <div key={s} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: active ? "var(--grn)" : "var(--border)", transition: "all .3s" }} />
+                        <div style={{ fontSize: 9, fontWeight: 700, color: active ? "var(--grn)" : "var(--muted)" }}>{s}</div>
+                        {i < 2 && <div style={{ width: 16, height: 1, background: "var(--border)", marginLeft: 4 }} />}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <div className="pop-anim" style={{ fontSize: 72, marginBottom: 12 }}>{lastOrder?.isFree ? "🎁" : "🍔"}</div>
             <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 42, letterSpacing: 2, lineHeight: 1, marginBottom: 8 }}>
               {lastOrder?.isFree ? "FREE ORDER PLACED!" : "ORDER PLACED!"}
@@ -658,6 +710,22 @@ export default function CustomerApp() {
                   <button className="btn btn-ghost btn-full" onClick={() => setShowPopup(null)}>Later</button>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ORDER READY POPUP */}
+        {orderReadyPopup && (
+          <div className="modal-overlay" onClick={() => setOrderReadyPopup(false)}>
+            <div className="modal-sheet" style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+              <div style={{ fontSize: 72, marginBottom: 12 }} className="pop-anim">✅</div>
+              <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 36, letterSpacing: 2, color: "var(--grn)", marginBottom: 8 }}>YOUR ORDER IS READY!</div>
+              <div style={{ fontSize: 14, color: "var(--muted)", marginBottom: 24, lineHeight: 1.6 }}>
+                Please collect your order from the counter. Enjoy your burger! 🍔
+              </div>
+              <button className="btn btn-grn btn-full" onClick={() => { setOrderReadyPopup(false); setCStep("menu"); setCustTab("menu"); }}>
+                COLLECT ORDER 🎉
+              </button>
             </div>
           </div>
         )}
